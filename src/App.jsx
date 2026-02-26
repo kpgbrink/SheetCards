@@ -510,6 +510,8 @@ export default function App() {
   const [pendingWrites, setPendingWrites] = useState(0);
   const [sessionAnswers, setSessionAnswers] = useState(0);
   const [sessionCorrect, setSessionCorrect] = useState(0);
+  const [sessionWrongCards, setSessionWrongCards] = useState(0);
+  const [sessionWrongSelections, setSessionWrongSelections] = useState(0);
   const [roundCompletedCount, setRoundCompletedCount] = useState(0);
   const [isFlushing, setIsFlushing] = useState(false);
 
@@ -541,6 +543,11 @@ export default function App() {
     if (cards.length === 0) return "0 / 0";
     return `${roundCompletedCount} / ${cards.length}`;
   }, [cards.length, roundCompletedCount]);
+  const tapAccuracy = useMemo(() => {
+    const totalSelections = sessionAnswers + sessionWrongSelections;
+    if (totalSelections === 0) return "0%";
+    return formatPercent(sessionAnswers / totalSelections);
+  }, [sessionAnswers, sessionWrongSelections]);
 
   const mostMissed = useMemo(() => {
     if (cards.length === 0) return "-";
@@ -736,6 +743,8 @@ export default function App() {
     setRoundCompletedCount(0);
     setSessionAnswers(0);
     setSessionCorrect(0);
+    setSessionWrongCards(0);
+    setSessionWrongSelections(0);
   }, [clearPendingAdvance]);
 
   const pickNextQuestion = useCallback((availableCards, previousCardId = "") => {
@@ -1095,12 +1104,16 @@ export default function App() {
     }
   }, [accessToken, newSheetTitle, rememberSheetRef]);
 
-  const handleLoadCards = useCallback(async () => {
+  const handleLoadCards = useCallback(async (options = {}) => {
+    const targetSheetRef = String(options.sheetRef ?? sheetRef);
+    const targetSpreadsheetId =
+      String(options.spreadsheetId ?? parseSpreadsheetId(targetSheetRef));
+
     if (!accessToken) {
       setStatus("Connect Google first.");
       return;
     }
-    if (!spreadsheetId) {
+    if (!targetSpreadsheetId) {
       setStatus("Invalid sheet URL or spreadsheet ID.");
       return;
     }
@@ -1109,17 +1122,17 @@ export default function App() {
       setStatus(`Loading cards from ${CARD_DATA_SHEET} and stats from ${CARD_STATS_SHEET}...`);
       const [cardsResponse, statsResponse, metadata] = await Promise.all([
         sheetsGetValues({
-          spreadsheetId,
+          spreadsheetId: targetSpreadsheetId,
           range: makeRange(CARD_DATA_SHEET, "A:Z"),
           accessToken
         }),
         sheetsGetValues({
-          spreadsheetId,
+          spreadsheetId: targetSpreadsheetId,
           range: makeRange(CARD_STATS_SHEET, "A:Z"),
           accessToken
         }),
         sheetsGetSpreadsheet({
-          spreadsheetId,
+          spreadsheetId: targetSpreadsheetId,
           accessToken
         })
       ]);
@@ -1270,7 +1283,7 @@ export default function App() {
       }
 
       contextRef.current = {
-        spreadsheetId,
+        spreadsheetId: targetSpreadsheetId,
         statsSheet: {
           title: CARD_STATS_SHEET,
           colByName: statsColByName
@@ -1281,7 +1294,7 @@ export default function App() {
       resetRoundState();
       pickNextQuestion(nextCards);
       refreshPendingCount();
-      rememberSheetRef(sheetRef, String(metadata.properties?.title || ""));
+      rememberSheetRef(targetSheetRef || targetSpreadsheetId, String(metadata.properties?.title || ""));
       setAppStage("sheet");
 
       if (pendingStatsRef.current.size > 0) {
@@ -1309,6 +1322,40 @@ export default function App() {
     sheetRef,
     spreadsheetId
   ]);
+
+  const handleSelectRecentSheet = useCallback(
+    (id) => {
+      const nextUrl = `https://docs.google.com/spreadsheets/d/${id}/edit`;
+      setSheetRef(nextUrl);
+      setStatus(`Selected ${recentSheetNames[id] || "sheet"}. Auto-loading cards...`);
+      handleLoadCards({
+        spreadsheetId: id,
+        sheetRef: nextUrl
+      });
+    },
+    [handleLoadCards, recentSheetNames]
+  );
+
+  const handleUnloadCards = useCallback(async () => {
+    if (pendingWrites > 0) {
+      const shouldSync = window.confirm(
+        "You have pending updates. Sync before unloading cards?"
+      );
+      if (shouldSync) {
+        await flushPending(false);
+      }
+    }
+
+    clearPendingAdvance();
+    stopNarration();
+    setCards([]);
+    setCurrentCardId("");
+    setChoices([]);
+    setAnswerState(null);
+    resetRoundState();
+    setAppStage("sheet");
+    setStatus("Cards unloaded. Load a sheet to study again.");
+  }, [clearPendingAdvance, flushPending, pendingWrites, resetRoundState, stopNarration]);
 
   const goToQueuedNextCard = useCallback(() => {
     const queued = pendingNextRef.current;
@@ -1365,16 +1412,16 @@ export default function App() {
     (choice) => {
       if (!currentCard) return;
       const correctAnswer = answerFor(currentCard, currentDirection);
-      const applyCorrectCompletion = (cardsSnapshot) => {
+      const applyCardCompletion = (cardsSnapshot, hadMistake) => {
         const now = new Date().toISOString();
         const updatedCard = {
           ...currentCard,
           seenCount: currentCard.seenCount + 1,
-          correctCount: currentCard.correctCount + 1,
-          wrongCount: currentCard.wrongCount,
-          streak: currentCard.streak + 1,
+          correctCount: currentCard.correctCount + (hadMistake ? 0 : 1),
+          wrongCount: currentCard.wrongCount + (hadMistake ? 1 : 0),
+          streak: hadMistake ? 0 : currentCard.streak + 1,
           lastSeenAt: now,
-          lastResult: "correct"
+          lastResult: hadMistake ? "wrong" : "correct"
         };
         updatedCard.mastery = computeMastery(updatedCard);
 
@@ -1385,12 +1432,17 @@ export default function App() {
         queueStatUpdate(updatedCard);
 
         const nextAnswers = sessionAnswers + 1;
-        const nextCorrect = sessionCorrect + 1;
+        const nextCorrect = sessionCorrect + (hadMistake ? 0 : 1);
         setSessionAnswers(nextAnswers);
         setSessionCorrect(nextCorrect);
+        if (hadMistake) {
+          setSessionWrongCards((prev) => prev + 1);
+        }
         setAnswerState({
-          isCorrect: true,
-          expected: correctAnswer
+          isCorrect: !hadMistake,
+          completedWithMistake: hadMistake,
+          expected: correctAnswer,
+          requiresCorrection: false
         });
 
         if (!roundCompletedRef.current.has(updatedCard.cardId)) {
@@ -1431,7 +1483,7 @@ export default function App() {
         if (choice !== correctAnswer) {
           return;
         }
-        applyCorrectCompletion(cards);
+        applyCardCompletion(cards, true);
         return;
       }
 
@@ -1440,16 +1492,18 @@ export default function App() {
       }
 
       if (choice !== correctAnswer) {
+        setSessionWrongSelections((prev) => prev + 1);
         setAnswerState({
           isCorrect: false,
           expected: correctAnswer,
           requiresCorrection: true,
-          wrongChoice: choice
+          wrongChoice: choice,
+          completedWithMistake: true
         });
         return;
       }
 
-      applyCorrectCompletion(cards);
+      applyCardCompletion(cards, false);
     },
     [
       answerState,
@@ -1463,6 +1517,7 @@ export default function App() {
       flushPending,
       goToQueuedNextCard,
       queueStatUpdate,
+      sessionWrongCards,
       stopNarration,
       sessionAnswers,
       sessionCorrect
@@ -1470,6 +1525,10 @@ export default function App() {
   );
 
   const isCorrectionPhase = Boolean(answerState?.requiresCorrection);
+  const feedbackTone =
+    answerState?.requiresCorrection || answerState?.completedWithMistake
+      ? "bad"
+      : "good";
   const speakQuestion = useCallback(() => {
     if (!currentCard) return;
     const prompt = promptFor(currentCard, currentDirection);
@@ -1514,6 +1573,14 @@ export default function App() {
               onClick={() => setAppStage("study")}
             >
               Study
+            </button>
+          )}
+          {canGoStudy && (
+            <button
+              className={`btn ${appStage === "summary" ? "btn-accent" : "btn-subtle"}`}
+              onClick={() => setAppStage("summary")}
+            >
+              Stats
             </button>
           )}
         </div>
@@ -1563,10 +1630,8 @@ export default function App() {
                 {recentSheetRefs.map((id) => (
                   <button
                     key={id}
-                    className="btn btn-subtle recent-btn"
-                    onClick={() =>
-                      setSheetRef(`https://docs.google.com/spreadsheets/d/${id}/edit`)
-                    }
+                    className={`btn recent-btn ${spreadsheetId === id ? "btn-accent" : "btn-subtle"}`}
+                    onClick={() => handleSelectRecentSheet(id)}
                     title={id}
                   >
                     {recentSheetNames[id] || "Loading name..."}
@@ -1589,6 +1654,13 @@ export default function App() {
               disabled={!accessToken || !spreadsheetId}
             >
               Load Cards
+            </button>
+            <button
+              className="btn btn-subtle"
+              onClick={handleUnloadCards}
+              disabled={cards.length === 0}
+            >
+              Unload Cards
             </button>
             <button
               className="btn btn-subtle"
@@ -1669,7 +1741,8 @@ export default function App() {
             <div className="study-state">
               <div className="card-meta">
                 <span>{`Round ${roundProgress}`}</span>
-                <span>{`Round Accuracy ${sessionAccuracy}`}</span>
+                <span>{`First Try ${sessionAccuracy}`}</span>
+                <span>{`Missed ${sessionWrongCards}`}</span>
                 <span>{`Mastery ${currentCard.mastery.toFixed(2)}`}</span>
               </div>
               <div className="actions card-actions">
@@ -1778,10 +1851,12 @@ export default function App() {
                 })}
               </div>
               {answerState && (
-                <p className={`feedback ${answerState.isCorrect ? "good" : "bad"}`}>
-                  {answerState.isCorrect
-                    ? "Correct"
-                    : "Not yet. Tap the correct answer to continue."}
+                <p className={`feedback ${feedbackTone}`}>
+                  {answerState.requiresCorrection
+                    ? "Not yet. Tap the correct answer to continue."
+                    : answerState.completedWithMistake
+                      ? "Completed after correction. Counted as wrong."
+                      : "Correct on first try."}
                 </p>
               )}
               {answerState && promptExplanationFor(currentCard, currentDirection) && (
@@ -1810,15 +1885,27 @@ export default function App() {
 
       {appStage === "summary" && (
         <section className="panel stage-panel">
-          <h2>Round Summary</h2>
+          <h2>Stats</h2>
           <section className="metrics-panel">
             <div className="metric">
               <span>Cards Completed</span>
               <strong>{roundProgress}</strong>
             </div>
             <div className="metric">
-              <span>Accuracy</span>
+              <span>First Try Accuracy</span>
               <strong>{sessionAccuracy}</strong>
+            </div>
+            <div className="metric">
+              <span>Tap Accuracy</span>
+              <strong>{tapAccuracy}</strong>
+            </div>
+            <div className="metric">
+              <span>Cards Missed</span>
+              <strong>{sessionWrongCards}</strong>
+            </div>
+            <div className="metric">
+              <span>Wrong Selections</span>
+              <strong>{sessionWrongSelections}</strong>
             </div>
             <div className="metric">
               <span>Most Missed</span>
