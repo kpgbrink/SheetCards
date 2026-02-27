@@ -504,7 +504,7 @@ export default function App() {
   const [currentCardId, setCurrentCardId] = useState("");
   const [choices, setChoices] = useState([]);
   const [answerState, setAnswerState] = useState(null);
-  const [autoAdvanceMode, setAutoAdvanceMode] = useState("delay");
+  const [autoAdvanceMode, setAutoAdvanceMode] = useState("manual");
   const [autoAdvanceMs, setAutoAdvanceMs] = useState(1500);
   const [awaitingManualNext, setAwaitingManualNext] = useState(false);
   const [spokenTarget, setSpokenTarget] = useState("");
