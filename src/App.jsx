@@ -62,6 +62,8 @@ const STORAGE_KEYS = {
 const RECENT_SHEETS_LIMIT = 6;
 const DEFAULT_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || "";
 const DEFAULT_GOOGLE_API_KEY = import.meta.env.VITE_GOOGLE_API_KEY || "";
+const DEFAULT_GOOGLE_CLOUD_PROJECT_NUMBER =
+  import.meta.env.VITE_GOOGLE_CLOUD_PROJECT_NUMBER || "";
 
 function getStoredValue(key, fallback = "") {
   try {
@@ -561,6 +563,7 @@ export default function App() {
   const [status, setStatus] = useState(
     "Connect Google to continue."
   );
+  const [sheetLoadErrors, setSheetLoadErrors] = useState({});
   const [gisReady, setGisReady] = useState(false);
   const [pickerReady, setPickerReady] = useState(false);
   const [accessToken, setAccessToken] = useState("");
@@ -570,6 +573,7 @@ export default function App() {
   const [answerState, setAnswerState] = useState(null);
   const [autoAdvanceMode, setAutoAdvanceMode] = useState("manual");
   const [autoAdvanceMs, setAutoAdvanceMs] = useState(1500);
+  const [autoReadQuestion, setAutoReadQuestion] = useState(false);
   const [awaitingManualNext, setAwaitingManualNext] = useState(false);
   const [spokenTarget, setSpokenTarget] = useState("");
   const [pendingWrites, setPendingWrites] = useState(0);
@@ -627,6 +631,143 @@ export default function App() {
     if (!missed || missed.wrongCount === 0) return "-";
     return `${missed.front} (${missed.wrongCount})`;
   }, [cards]);
+  const analyzedCards = useMemo(
+    () =>
+      cards.map((card) => {
+        const seen = Math.max(0, card.seenCount);
+        const correct = Math.max(0, card.correctCount);
+        const wrong = Math.max(0, card.wrongCount);
+        return {
+          ...card,
+          seen,
+          correct,
+          wrong,
+          accuracy: seen > 0 ? correct / seen : 0,
+          masteryValue: clamp(Number(card.mastery) || 0, 0, 1)
+        };
+      }),
+    [cards]
+  );
+  const statsOverview = useMemo(() => {
+    const totalSeen = analyzedCards.reduce((sum, card) => sum + card.seen, 0);
+    const totalCorrect = analyzedCards.reduce((sum, card) => sum + card.correct, 0);
+    const totalWrong = analyzedCards.reduce((sum, card) => sum + card.wrong, 0);
+    const seenCards = analyzedCards.filter((card) => card.seen > 0).length;
+    const averageMastery =
+      analyzedCards.length === 0
+        ? 0
+        : analyzedCards.reduce((sum, card) => sum + card.masteryValue, 0) /
+          analyzedCards.length;
+
+    return {
+      totalSeen,
+      totalCorrect,
+      totalWrong,
+      seenCards,
+      averageMastery
+    };
+  }, [analyzedCards]);
+  const hardestCards = useMemo(
+    () =>
+      [...analyzedCards]
+        .filter((card) => card.seen > 0 || card.wrong > 0)
+        .sort(
+          (a, b) =>
+            b.wrong - a.wrong ||
+            a.masteryValue - b.masteryValue ||
+            b.seen - a.seen
+        )
+        .slice(0, 8),
+    [analyzedCards]
+  );
+  const strongestCards = useMemo(
+    () =>
+      [...analyzedCards]
+        .filter((card) => card.seen > 0)
+        .sort(
+          (a, b) =>
+            b.masteryValue - a.masteryValue ||
+            b.accuracy - a.accuracy ||
+            b.streak - a.streak
+        )
+        .slice(0, 8),
+    [analyzedCards]
+  );
+  const mostSeenCards = useMemo(
+    () =>
+      [...analyzedCards]
+        .filter((card) => card.seen > 0)
+        .sort((a, b) => b.seen - a.seen || b.correct - a.correct)
+        .slice(0, 8),
+    [analyzedCards]
+  );
+  const masteryBuckets = useMemo(() => {
+    const buckets = [
+      { key: "low", label: "Needs Work (< 40%)", count: 0 },
+      { key: "mid", label: "In Progress (40-69%)", count: 0 },
+      { key: "high", label: "Strong (70%+)", count: 0 }
+    ];
+
+    for (const card of analyzedCards) {
+      if (card.masteryValue < 0.4) {
+        buckets[0].count += 1;
+      } else if (card.masteryValue < 0.7) {
+        buckets[1].count += 1;
+      } else {
+        buckets[2].count += 1;
+      }
+    }
+
+    return buckets;
+  }, [analyzedCards]);
+  const topTags = useMemo(() => {
+    const byTag = new Map();
+    for (const card of analyzedCards) {
+      for (const rawTag of card.tags) {
+        const tag = String(rawTag || "").trim();
+        if (!tag) continue;
+        const existing = byTag.get(tag) || {
+          count: 0,
+          wrong: 0,
+          masteryTotal: 0
+        };
+        existing.count += 1;
+        existing.wrong += card.wrong;
+        existing.masteryTotal += card.masteryValue;
+        byTag.set(tag, existing);
+      }
+    }
+
+    return [...byTag.entries()]
+      .map(([tag, value]) => ({
+        tag,
+        count: value.count,
+        wrong: value.wrong,
+        averageMastery: value.count > 0 ? value.masteryTotal / value.count : 0
+      }))
+      .sort((a, b) => b.wrong - a.wrong || a.averageMastery - b.averageMastery)
+      .slice(0, 6);
+  }, [analyzedCards]);
+  const hardestMaxWrong = useMemo(
+    () => Math.max(1, ...hardestCards.map((card) => card.wrong)),
+    [hardestCards]
+  );
+  const strongestMaxMastery = useMemo(
+    () => Math.max(1, ...strongestCards.map((card) => card.masteryValue)),
+    [strongestCards]
+  );
+  const mostSeenMax = useMemo(
+    () => Math.max(1, ...mostSeenCards.map((card) => card.seen)),
+    [mostSeenCards]
+  );
+  const masteryBucketMax = useMemo(
+    () => Math.max(1, ...masteryBuckets.map((bucket) => bucket.count)),
+    [masteryBuckets]
+  );
+  const topTagWrongMax = useMemo(
+    () => Math.max(1, ...topTags.map((tag) => tag.wrong)),
+    [topTags]
+  );
 
   const spreadsheetId = useMemo(() => parseSpreadsheetId(sheetRef), [sheetRef]);
   const spreadsheetEditUrl = useMemo(() => {
@@ -659,8 +800,9 @@ export default function App() {
   }, [promptStudyNotes]);
   const clientId = DEFAULT_CLIENT_ID.trim();
   const googleApiKey = DEFAULT_GOOGLE_API_KEY.trim();
+  const googleCloudProjectNumber = DEFAULT_GOOGLE_CLOUD_PROJECT_NUMBER.trim();
   const isConfigured = Boolean(clientId);
-  const isPickerConfigured = Boolean(googleApiKey);
+  const isPickerConfigured = Boolean(googleApiKey && googleCloudProjectNumber);
   const promptFor = useCallback(
     (card, direction) => (direction === "front_to_back" ? card.front : card.back),
     []
@@ -804,6 +946,27 @@ export default function App() {
       }));
     }
   }, []);
+  const markSheetLoadError = useCallback((spreadsheetRefId) => {
+    const id = String(spreadsheetRefId || "").trim();
+    if (!id) return;
+    setSheetLoadErrors((previous) => {
+      if (previous[id]) return previous;
+      return {
+        ...previous,
+        [id]: true
+      };
+    });
+  }, []);
+  const clearSheetLoadError = useCallback((spreadsheetRefId) => {
+    const id = String(spreadsheetRefId || "").trim();
+    if (!id) return;
+    setSheetLoadErrors((previous) => {
+      if (!previous[id]) return previous;
+      const next = { ...previous };
+      delete next[id];
+      return next;
+    });
+  }, []);
 
   const resetRoundState = useCallback(() => {
     clearPendingAdvance();
@@ -855,7 +1018,23 @@ export default function App() {
     setCurrentCardId(nextCard.cardId);
     setChoices(nextChoices);
     setAnswerState(null);
-  }, [answerFor, clearPendingAdvance, resolveDirection, stopNarration]);
+    if (autoReadQuestion) {
+      speakSequence([
+        {
+          target: "question",
+          text: promptFor(nextCard, nextDirection)
+        }
+      ]);
+    }
+  }, [
+    answerFor,
+    autoReadQuestion,
+    clearPendingAdvance,
+    promptFor,
+    resolveDirection,
+    speakSequence,
+    stopNarration
+  ]);
 
   const flushPending = useCallback(
     async (silent = false) => {
@@ -997,7 +1176,7 @@ export default function App() {
   useEffect(() => {
     if (!accessToken) return;
     if (cards.length > 0) return;
-    if (appStage === "study" || appStage === "summary") {
+    if (appStage === "study" || appStage === "summary" || appStage === "stats") {
       setAppStage("sheet");
     }
   }, [accessToken, appStage, cards.length]);
@@ -1024,7 +1203,7 @@ export default function App() {
     }
     if (!clientId.trim()) {
       setStatus(
-        "App setup incomplete: missing VITE_GOOGLE_CLIENT_ID. Ask the app owner to configure it and restart the app."
+        "Google sign-in is temporarily unavailable. Please try again later."
       );
       return;
     }
@@ -1102,6 +1281,7 @@ export default function App() {
     setSheetRef("");
     setRecentSheetRefs([]);
     setRecentSheetNames({});
+    setSheetLoadErrors({});
     setPromptStudyNotes("");
     setStatus("Cleared local sheet history and local app data.");
   }, []);
@@ -1269,6 +1449,7 @@ export default function App() {
 
       const cardRows = cardsResponse.values ?? [];
       if (cardRows.length === 0) {
+        markSheetLoadError(targetSpreadsheetId);
         setCards([]);
         setCurrentCardId("");
         setChoices([]);
@@ -1284,6 +1465,7 @@ export default function App() {
         (name) => !Number.isInteger(cardsColByName[name])
       );
       if (missingCardColumns.length > 0) {
+        markSheetLoadError(targetSpreadsheetId);
         setStatus(
           `${CARD_DATA_SHEET} is missing required columns: ${missingCardColumns.join(", ")}. Click "Initialize Sheet Template".`
         );
@@ -1292,6 +1474,7 @@ export default function App() {
 
       const statsRows = statsResponse.values ?? [];
       if (statsRows.length === 0) {
+        markSheetLoadError(targetSpreadsheetId);
         setStatus(
           `${CARD_STATS_SHEET} is empty. Click "Initialize Sheet Template" first.`
         );
@@ -1303,6 +1486,7 @@ export default function App() {
         (name) => !Number.isInteger(statsColByName[name])
       );
       if (missingStatsColumns.length > 0) {
+        markSheetLoadError(targetSpreadsheetId);
         setStatus(
           `${CARD_STATS_SHEET} is missing required columns: ${missingStatsColumns.join(", ")}. Click "Initialize Sheet Template".`
         );
@@ -1313,6 +1497,7 @@ export default function App() {
         Number.isInteger(statsColByName.back) &&
         Number.isInteger(statsColByName.romanization);
       if (!hasStatsQaColumns) {
+        markSheetLoadError(targetSpreadsheetId);
         setStatus(
           `${CARD_STATS_SHEET} must include question, answer, and pronunciation columns. Click "Initialize Sheet Template".`
         );
@@ -1425,6 +1610,7 @@ export default function App() {
       pickNextQuestion(nextCards);
       refreshPendingCount();
       rememberSheetRef(targetSheetRef || targetSpreadsheetId, String(metadata.properties?.title || ""));
+      clearSheetLoadError(targetSpreadsheetId);
       setAppStage("sheet");
 
       if (pendingStatsRef.current.size > 0) {
@@ -1438,22 +1624,27 @@ export default function App() {
         message.includes("PERMISSION_DENIED") ||
         message.includes("The caller does not have permission")
       ) {
+        markSheetLoadError(targetSpreadsheetId);
         setStatus(
           "This file is not yet authorized for this app. Use 'Pick Sheet From Drive' to grant access, then load again."
         );
         return;
       }
       if (message.includes("Unable to parse range")) {
+        markSheetLoadError(targetSpreadsheetId);
         setStatus(
           `Sheet tabs are missing. Click "Initialize Sheet Template" to create ${CARD_DATA_SHEET} and ${CARD_STATS_SHEET}.`
         );
         return;
       }
+      markSheetLoadError(targetSpreadsheetId);
       setStatus(message);
     }
   }, [
     accessToken,
+    clearSheetLoadError,
     flushPending,
+    markSheetLoadError,
     pickNextQuestion,
     rememberSheetRef,
     resetRoundState,
@@ -1472,7 +1663,9 @@ export default function App() {
       return;
     }
     if (!isPickerConfigured) {
-      setStatus("App owner action required: missing VITE_GOOGLE_API_KEY.");
+      setStatus(
+        "Drive Picker is unavailable in this deployment. You can still create a new sheet in this app."
+      );
       return;
     }
     if (!window.google?.picker) {
@@ -1490,6 +1683,7 @@ export default function App() {
       const picker = new window.google.picker.PickerBuilder()
         .setOAuthToken(accessToken)
         .setDeveloperKey(googleApiKey)
+        .setAppId(googleCloudProjectNumber)
         .setTitle("Select a spreadsheet")
         .addView(view)
         .setCallback((data) => {
@@ -1524,6 +1718,7 @@ export default function App() {
   }, [
     accessToken,
     googleApiKey,
+    googleCloudProjectNumber,
     handleLoadCards,
     isPickerConfigured,
     pickerReady,
@@ -1667,7 +1862,7 @@ export default function App() {
           pendingNextRef.current = null;
           setAwaitingManualNext(false);
           setAppStage("summary");
-          setStatus("Round complete. Review summary and start the next round.");
+          setStatus("Round complete. Review Round Stats and start the next round.");
           return;
         }
 
@@ -1751,8 +1946,49 @@ export default function App() {
     );
   }, [choices, currentCard, speakSequence]);
 
+  const hasLoadedCards = cards.length > 0;
+  const hasSelectedSheet = Boolean(spreadsheetId);
+  const canLoadCards = Boolean(accessToken && spreadsheetId);
+  const activeWorkflowStep = !accessToken
+    ? 1
+    : !hasSelectedSheet
+      ? 2
+      : !hasLoadedCards
+        ? 3
+        : 4;
+  const workflowStepTone = (stepNumber) => {
+    if (stepNumber < activeWorkflowStep) return "done";
+    if (stepNumber === activeWorkflowStep) return "active";
+    return "todo";
+  };
   const canGoSheet = Boolean(accessToken);
-  const canGoStudy = cards.length > 0;
+  const canGoStudy = hasLoadedCards;
+  const canGoStats = hasLoadedCards;
+  const statusIsError = useMemo(() => {
+    const value = String(status || "").toLowerCase();
+    const errorSignals = [
+      "error",
+      "failed",
+      "invalid",
+      "missing",
+      "must include",
+      "permission",
+      "denied",
+      "unavailable",
+      "blocked",
+      "unable",
+      "empty",
+      "not yet authorized"
+    ];
+    return errorSignals.some((token) => value.includes(token));
+  }, [status]);
+  const pickerDisabledReason = !accessToken
+    ? "Connect Google first."
+    : !isPickerConfigured
+      ? "Drive Picker setup is incomplete for this deployment."
+      : !pickerReady
+        ? "Drive Picker is still loading or blocked in this browser."
+        : "";
 
   return (
     <div className="page">
@@ -1761,7 +1997,7 @@ export default function App() {
           <img className="brand-logo" src={sheetCardsLogo} alt="Sheet Cards logo" />
           <h1 className="brand-wordmark">Sheet Cards</h1>
         </div>
-        <p>Study flow: Connect Google, then Load Sheet, then Study, then Round Summary.</p>
+        <p>Study flow: Connect Google, then Load Sheet, then Study, then Round Stats and Stats.</p>
         <div className="hero-actions">
           <button
             className={`btn ${appStage === "connect" ? "btn-accent" : "btn-subtle"}`}
@@ -1790,6 +2026,14 @@ export default function App() {
               className={`btn ${appStage === "summary" ? "btn-accent" : "btn-subtle"}`}
               onClick={() => setAppStage("summary")}
             >
+              Round Stats
+            </button>
+          )}
+          {canGoStats && (
+            <button
+              className={`btn ${appStage === "stats" ? "btn-accent" : "btn-subtle"}`}
+              onClick={() => setAppStage("stats")}
+            >
               Stats
             </button>
           )}
@@ -1807,8 +2051,8 @@ export default function App() {
             {isConfigured
               ? isPickerConfigured
                 ? "Sign in once to allow access to spreadsheets you create or pick in this app."
-                : "Google sign-in is configured. App owner: add VITE_GOOGLE_API_KEY to enable Drive Picker."
-              : "Missing VITE_GOOGLE_CLIENT_ID in app config."}
+                : "Drive Picker setup is incomplete for this deployment."
+              : "Google sign-in is temporarily unavailable. Please try again later."}
           </p>
           <div className="trust-panel">
             <h3>What We Access</h3>
@@ -1845,107 +2089,181 @@ export default function App() {
 
       {appStage === "sheet" && (
         <section className="panel stage-panel">
-          <h2>Load Or Create Sheet</h2>
-          <div className="field-grid compact">
-            <label className="field">
-              <span>Sheet URL or Spreadsheet ID</span>
-              <input
-                type="text"
-                value={sheetRef}
-                onChange={(event) => setSheetRef(event.target.value)}
-                placeholder="https://docs.google.com/spreadsheets/d/..."
-              />
-            </label>
-            <div className="field fixed-tabs">
-              <span>Expected Tabs</span>
-              <p>{`${CARD_DATA_SHEET} + ${CARD_STATS_SHEET}`}</p>
+          <h2>Get Learning Ready</h2>
+          <p className="status-inline">
+            Follow these steps in order. The active step is highlighted.
+          </p>
+          <div className="workflow-steps" role="list" aria-label="Setup steps">
+            <div className={`workflow-step ${workflowStepTone(1)}`} role="listitem">
+              <strong>1</strong>
+              <span>Connect Google</span>
+            </div>
+            <div className={`workflow-step ${workflowStepTone(2)}`} role="listitem">
+              <strong>2</strong>
+              <span>Choose Sheet</span>
+            </div>
+            <div className={`workflow-step ${workflowStepTone(3)}`} role="listitem">
+              <strong>3</strong>
+              <span>Load Cards</span>
+            </div>
+            <div className={`workflow-step ${workflowStepTone(4)}`} role="listitem">
+              <strong>4</strong>
+              <span>Start Study</span>
             </div>
           </div>
-          <p className="status-inline">
-            Recommended: use <strong>Pick Sheet From Drive</strong> so this app is explicitly authorized for the file.
-          </p>
-          {recentSheetRefs.length > 0 && (
-            <div className="recent-row">
-              <span>Recent Sheets</span>
-              <div className="recent-list">
-                {recentSheetRefs.map((id) => (
-                  <button
-                    key={id}
-                    className={`btn recent-btn ${spreadsheetId === id ? "btn-accent" : "btn-subtle"}`}
-                    onClick={() => handleSelectRecentSheet(id)}
-                    title={id}
-                  >
-                    {recentSheetNames[id] || "Loading name..."}
-                  </button>
-                ))}
+          <section className="sheet-step-card">
+            <h3>Step 2: Choose a spreadsheet</h3>
+            <div className="field-grid compact">
+              <label className="field">
+                <span>Sheet URL or Spreadsheet ID</span>
+                <input
+                  type="text"
+                  value={sheetRef}
+                  onChange={(event) => setSheetRef(event.target.value)}
+                  placeholder="https://docs.google.com/spreadsheets/d/..."
+                />
+              </label>
+              <div className="field fixed-tabs">
+                <span>Required Tabs</span>
+                <p>{`${CARD_DATA_SHEET} + ${CARD_STATS_SHEET}`}</p>
               </div>
             </div>
-          )}
-          <div className="actions">
-            <button
-              className="btn btn-accent"
-              onClick={handlePickSheetFromDrive}
-              disabled={!accessToken || !pickerReady || !isPickerConfigured}
-            >
-              Pick Sheet From Drive
-            </button>
-            <button
-              className="btn"
-              onClick={handleInitializeSheetTemplate}
-              disabled={!accessToken || !spreadsheetId}
-            >
-              Initialize Sheet Template
-            </button>
-            <button
-              className="btn btn-accent"
-              onClick={handleLoadCards}
-              disabled={!accessToken || !spreadsheetId}
-            >
-              Load Cards
-            </button>
-            <button
-              className="btn btn-subtle"
-              onClick={handleUnloadCards}
-              disabled={cards.length === 0}
-            >
-              Unload Cards
-            </button>
-            <button
-              className="btn btn-subtle"
-              onClick={() => flushPending(false)}
-              disabled={pendingWrites === 0 || isFlushing}
-            >
-              {isFlushing ? "Syncing..." : "Sync Pending"}
-            </button>
-            <button
-              className="btn btn-subtle"
-              onClick={handleOpenSheet}
-              disabled={!spreadsheetId}
-            >
-              Open Sheet
-            </button>
-          </div>
-          <div className="new-sheet">
-            <label className="field">
-              <span>New Sheet Name</span>
-              <input
-                type="text"
-                value={newSheetTitle}
-                onChange={(event) => setNewSheetTitle(event.target.value)}
-                placeholder="Sheet Cards"
-              />
-            </label>
             <div className="actions">
-              <button className="btn" onClick={handleCreateSheet} disabled={!accessToken}>
-                Create New Sheet
+              <button
+                className="btn btn-accent"
+                onClick={handlePickSheetFromDrive}
+                disabled={!accessToken || !pickerReady || !isPickerConfigured}
+              >
+                Pick Sheet From Drive
               </button>
-              <button className="btn btn-accent" onClick={handleStartStudyRound} disabled={cards.length === 0}>
-                Start Study Round
+              <button
+                className="btn btn-subtle"
+                onClick={handleOpenSheet}
+                disabled={!spreadsheetId}
+              >
+                Open Sheet
               </button>
             </div>
-          </div>
-          <div className="prompt-builder">
-            <h3>Prompt Starter (TSV For Sheets)</h3>
+            {pickerDisabledReason && (
+              <p className="status-inline">{pickerDisabledReason}</p>
+            )}
+            {recentSheetRefs.length > 0 && (
+              <div className="recent-row">
+                <span>Recent Sheets</span>
+                <div className="recent-list">
+                  {recentSheetRefs.map((id, index) => {
+                    const isSelected = spreadsheetId === id;
+                    const hasLoadError = Boolean(sheetLoadErrors[id]);
+                    const recentButtonClass = [
+                      "btn",
+                      "recent-btn",
+                      isSelected ? "recent-btn-selected" : "btn-subtle",
+                      hasLoadError ? "recent-btn-error" : ""
+                    ]
+                      .filter(Boolean)
+                      .join(" ");
+                    return (
+                      <button
+                        key={id}
+                        className={recentButtonClass}
+                        onClick={() => handleSelectRecentSheet(id)}
+                        title={id}
+                      >
+                        <span className="recent-name">{recentSheetNames[id] || "Loading name..."}</span>
+                        {hasLoadError ? (
+                          <span className="recent-badge recent-badge-error">Needs Fix</span>
+                        ) : isSelected ? (
+                          <span className="recent-badge recent-badge-selected">Selected</span>
+                        ) : (
+                          index === 0 && <span className="recent-badge">Last Used</span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            <div className="new-sheet">
+              <label className="field">
+                <span>Create New Sheet</span>
+                <input
+                  type="text"
+                  value={newSheetTitle}
+                  onChange={(event) => setNewSheetTitle(event.target.value)}
+                  placeholder="Sheet Cards"
+                />
+              </label>
+              <div className="actions">
+                <button className="btn" onClick={handleCreateSheet} disabled={!accessToken}>
+                  Create New Sheet
+                </button>
+              </div>
+            </div>
+          </section>
+          <section className="sheet-step-card">
+            <h3>Step 3: Prepare and load cards</h3>
+            <p className="sheet-hint">
+              If this is a new sheet, initialize the template once, then load your cards.
+            </p>
+            <div className="actions">
+              <button
+                className="btn"
+                onClick={handleInitializeSheetTemplate}
+                disabled={!accessToken || !spreadsheetId}
+              >
+                Initialize Sheet Template
+              </button>
+              <button
+                className="btn btn-load-cards"
+                onClick={handleLoadCards}
+                disabled={!canLoadCards}
+              >
+                Load Cards
+              </button>
+              <button
+                className="btn btn-subtle"
+                onClick={handleUnloadCards}
+                disabled={!hasLoadedCards}
+              >
+                Unload Cards
+              </button>
+              <button
+                className="btn btn-subtle"
+                onClick={() => flushPending(false)}
+                disabled={pendingWrites === 0 || isFlushing}
+              >
+                {isFlushing ? "Syncing..." : "Sync Pending"}
+              </button>
+            </div>
+          </section>
+          {hasLoadedCards ? (
+            <section className="study-cta">
+              <div className="study-cta-copy">
+                <h3>Step 4: Ready To Study</h3>
+                <p>
+                  Your deck is loaded. Start now and keep momentum while these cards are fresh.
+                </p>
+                <div className="study-cta-meta">
+                  <span className="study-pill">{`${cards.length} cards loaded`}</span>
+                  <span className="study-pill">{`${pendingWrites} pending writes`}</span>
+                </div>
+              </div>
+              <button className="btn btn-start-round" onClick={handleStartStudyRound}>
+                Start Study Round
+              </button>
+            </section>
+          ) : (
+            <section className="study-cta study-cta-pending">
+              <div className="study-cta-copy">
+                <h3>Step 4: Start Study</h3>
+                <p>
+                  Complete <strong>Step 3: Load Cards</strong>. Start Study Round appears when cards are ready.
+                </p>
+              </div>
+            </section>
+          )}
+          <details className="prompt-builder">
+            <summary>Optional: Generate New Cards With A Prompt</summary>
             <p className="status-inline">
               Paste your topic/study material below, then copy this prompt into ChatGPT. The output will be tab-separated for direct paste into Google Sheets.
             </p>
@@ -1967,7 +2285,7 @@ export default function App() {
                 Copy Prompt
               </button>
             </div>
-          </div>
+          </details>
           <section className="metrics-panel compact-metrics">
             <div className="metric">
               <span>Cards Loaded</span>
@@ -2048,6 +2366,13 @@ export default function App() {
                 )}
               </div>
               <div className="actions card-actions">
+                <button
+                  className={`btn ${autoReadQuestion ? "btn-accent" : "btn-subtle"}`}
+                  onClick={() => setAutoReadQuestion((value) => !value)}
+                  disabled={!speechSupported}
+                >
+                  {autoReadQuestion ? "Auto Read On" : "Auto Read Off"}
+                </button>
                 <button className="btn btn-subtle" onClick={speakQuestion} disabled={!speechSupported}>
                   Read Question
                 </button>
@@ -2139,7 +2464,7 @@ export default function App() {
 
       {appStage === "summary" && (
         <section className="panel stage-panel">
-          <h2>Stats</h2>
+          <h2>Round Stats</h2>
           <section className="metrics-panel">
             <div className="metric">
               <span>Cards Completed</span>
@@ -2181,6 +2506,9 @@ export default function App() {
             <button className="btn" onClick={() => setAppStage("sheet")}>
               Back To Sheet
             </button>
+            <button className="btn btn-subtle" onClick={() => setAppStage("stats")}>
+              Open Stats
+            </button>
             <button className="btn btn-accent" onClick={handleStartStudyRound} disabled={cards.length === 0}>
               Start Next Round
             </button>
@@ -2188,7 +2516,219 @@ export default function App() {
         </section>
       )}
 
-      <p className="status">{status}</p>
+      {appStage === "stats" && (
+        <section className="panel stage-panel">
+          <h2>Stats</h2>
+          <p className="status-inline">
+            Analytics from your currently loaded card progress.
+          </p>
+          <section className="metrics-panel">
+            <div className="metric">
+              <span>Total Reviews</span>
+              <strong>{statsOverview.totalSeen}</strong>
+            </div>
+            <div className="metric">
+              <span>Overall Accuracy</span>
+              <strong>
+                {statsOverview.totalSeen === 0
+                  ? "0%"
+                  : formatPercent(statsOverview.totalCorrect / statsOverview.totalSeen)}
+              </strong>
+            </div>
+            <div className="metric">
+              <span>Total Wrong</span>
+              <strong>{statsOverview.totalWrong}</strong>
+            </div>
+            <div className="metric">
+              <span>Cards Seen</span>
+              <strong>{`${statsOverview.seenCards} / ${cards.length}`}</strong>
+            </div>
+            <div className="metric">
+              <span>Average Mastery</span>
+              <strong>{formatPercent(statsOverview.averageMastery)}</strong>
+            </div>
+            <div className="metric">
+              <span>Most Missed</span>
+              <strong>{mostMissed}</strong>
+            </div>
+          </section>
+          <div className="stats-grid">
+            <section className="chart-card">
+              <div className="chart-head">
+                <h3>Worst Cards</h3>
+                <span>By wrong answers</span>
+              </div>
+              {hardestCards.length === 0 ? (
+                <p className="chart-empty">No attempts yet.</p>
+              ) : (
+                <div className="bar-list">
+                  {hardestCards.map((card) => (
+                    <div className="bar-row" key={`hardest-${card.cardId}`}>
+                      <div className="bar-label">
+                        <strong>{card.front}</strong>
+                        <span>{`${card.wrong} wrong`}</span>
+                      </div>
+                      <div className="bar-track">
+                        <div
+                          className="bar-fill bar-fill-bad"
+                          style={{
+                            width:
+                              card.wrong <= 0
+                                ? "0%"
+                                : `${Math.max(
+                                    8,
+                                    (card.wrong / hardestMaxWrong) * 100
+                                  )}%`
+                          }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+            <section className="chart-card">
+              <div className="chart-head">
+                <h3>Best Cards</h3>
+                <span>By mastery</span>
+              </div>
+              {strongestCards.length === 0 ? (
+                <p className="chart-empty">No mastered cards yet.</p>
+              ) : (
+                <div className="bar-list">
+                  {strongestCards.map((card) => (
+                    <div className="bar-row" key={`strongest-${card.cardId}`}>
+                      <div className="bar-label">
+                        <strong>{card.front}</strong>
+                        <span>{formatPercent(card.masteryValue)}</span>
+                      </div>
+                      <div className="bar-track">
+                        <div
+                          className="bar-fill bar-fill-good"
+                          style={{
+                            width:
+                              card.masteryValue <= 0
+                                ? "0%"
+                                : `${Math.max(
+                                    8,
+                                    (card.masteryValue / strongestMaxMastery) * 100
+                                  )}%`
+                          }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+            <section className="chart-card">
+              <div className="chart-head">
+                <h3>Most Practiced</h3>
+                <span>By reviews</span>
+              </div>
+              {mostSeenCards.length === 0 ? (
+                <p className="chart-empty">No review history yet.</p>
+              ) : (
+                <div className="bar-list">
+                  {mostSeenCards.map((card) => (
+                    <div className="bar-row" key={`seen-${card.cardId}`}>
+                      <div className="bar-label">
+                        <strong>{card.front}</strong>
+                        <span>{`${card.seen} seen`}</span>
+                      </div>
+                      <div className="bar-track">
+                        <div
+                          className="bar-fill bar-fill-neutral"
+                          style={{
+                            width: `${Math.max(8, (card.seen / mostSeenMax) * 100)}%`
+                          }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+            <section className="chart-card">
+              <div className="chart-head">
+                <h3>Mastery Distribution</h3>
+                <span>All loaded cards</span>
+              </div>
+              <div className="bar-list">
+                {masteryBuckets.map((bucket) => (
+                  <div className="bar-row" key={bucket.key}>
+                    <div className="bar-label">
+                      <strong>{bucket.label}</strong>
+                      <span>{bucket.count}</span>
+                    </div>
+                    <div className="bar-track">
+                      <div
+                        className={`bar-fill bar-fill-${bucket.key}`}
+                        style={{
+                          width:
+                            bucket.count <= 0
+                              ? "0%"
+                              : `${Math.max(
+                                  8,
+                                  (bucket.count / masteryBucketMax) * 100
+                                )}%`
+                        }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+            <section className="chart-card">
+              <div className="chart-head">
+                <h3>Tag Hotspots</h3>
+                <span>Tags with more mistakes</span>
+              </div>
+              {topTags.length === 0 ? (
+                <p className="chart-empty">No tags yet.</p>
+              ) : (
+                <div className="bar-list">
+                  {topTags.map((tag) => (
+                    <div className="bar-row" key={`tag-${tag.tag}`}>
+                      <div className="bar-label">
+                        <strong>{tag.tag}</strong>
+                        <span>{`${tag.wrong} wrong`}</span>
+                      </div>
+                      <div className="bar-track">
+                        <div
+                          className="bar-fill bar-fill-bad"
+                          style={{
+                            width:
+                              tag.wrong <= 0
+                                ? "0%"
+                                : `${Math.max(
+                                    8,
+                                    (tag.wrong / topTagWrongMax) * 100
+                                  )}%`
+                          }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          </div>
+          <div className="actions">
+            <button className="btn btn-subtle" onClick={() => setAppStage("summary")}>
+              Back To Round Stats
+            </button>
+            <button className="btn btn-subtle" onClick={() => setAppStage("sheet")}>
+              Back To Sheet
+            </button>
+            <button className="btn btn-accent" onClick={handleStartStudyRound} disabled={cards.length === 0}>
+              Start Next Round
+            </button>
+          </div>
+        </section>
+      )}
+
+      <p className={`status ${statusIsError ? "status-error" : ""}`}>{status}</p>
     </div>
   );
 }

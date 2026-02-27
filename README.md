@@ -46,6 +46,7 @@ cp .env.example .env.local
 
 Set `VITE_GOOGLE_CLIENT_ID` in `.env.local`.
 Set `VITE_GOOGLE_API_KEY` in `.env.local` (used by Google Picker).
+Set `VITE_GOOGLE_CLOUD_PROJECT_NUMBER` in `.env.local` (required for Picker with `drive.file`).
 
 Then run:
 
