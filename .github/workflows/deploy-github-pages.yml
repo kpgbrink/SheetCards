@@ -36,11 +36,15 @@ jobs:
         id: base
         shell: bash
         run: |
-          REPO_NAME="${GITHUB_REPOSITORY#*/}"
-          if [[ "$REPO_NAME" == *.github.io ]]; then
+          if [[ -f "public/CNAME" ]]; then
             echo "base_path=/" >> "$GITHUB_OUTPUT"
           else
-            echo "base_path=/$REPO_NAME/" >> "$GITHUB_OUTPUT"
+            REPO_NAME="${GITHUB_REPOSITORY#*/}"
+            if [[ "$REPO_NAME" == *.github.io ]]; then
+              echo "base_path=/" >> "$GITHUB_OUTPUT"
+            else
+              echo "base_path=/$REPO_NAME/" >> "$GITHUB_OUTPUT"
+            fi
           fi
 
       - name: Install Dependencies
