@@ -493,6 +493,7 @@ export default function App() {
   });
   const [promptStudyNotes, setPromptStudyNotes] = useState("");
   const [studyMode, setStudyMode] = useState("front_only");
+  const [showPronunciation, setShowPronunciation] = useState(true);
   const [currentDirection, setCurrentDirection] = useState("front_to_back");
   const [status, setStatus] = useState(
     "Connect Google to continue."
@@ -548,6 +549,13 @@ export default function App() {
     if (totalSelections === 0) return "0%";
     return formatPercent(sessionAnswers / totalSelections);
   }, [sessionAnswers, sessionWrongSelections]);
+  const cardHintText = useMemo(() => {
+    if (!currentCard) return "";
+    if (showPronunciation && currentCard.romanization) {
+      return currentCard.romanization;
+    }
+    return currentCard.tags.join(", ");
+  }, [currentCard, showPronunciation]);
 
   const mostMissed = useMemo(() => {
     if (cards.length === 0) return "-";
@@ -1767,6 +1775,12 @@ export default function App() {
                 >
                   Random
                 </button>
+                <button
+                  className={`btn ${showPronunciation ? "btn-accent" : "btn-subtle"}`}
+                  onClick={() => setShowPronunciation((value) => !value)}
+                >
+                  {showPronunciation ? "Pronunciation On" : "Pronunciation Off"}
+                </button>
               </div>
               <div className="actions card-actions">
                 <button
@@ -1825,7 +1839,7 @@ export default function App() {
                 {promptFor(currentCard, currentDirection)}
               </h2>
               <p className="card-hint">
-                {currentCard.romanization || currentCard.tags.join(", ")}
+                {cardHintText}
               </p>
               <div className="choices">
                 {choices.map((choice, index) => {
