@@ -231,6 +231,45 @@ body {
   margin: 0;
 }
 
+.trust-panel {
+  margin-top: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.75rem;
+  background: rgba(255, 255, 255, 0.74);
+}
+
+.trust-panel h3 {
+  margin: 0;
+  font-size: 0.98rem;
+}
+
+.trust-list {
+  margin: 0.45rem 0 0;
+  padding-left: 1.05rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+  display: grid;
+  gap: 0.25rem;
+}
+
+.legal-links {
+  margin-top: 0.6rem;
+  display: flex;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+}
+
+.legal-links a {
+  color: var(--accent-strong);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.legal-links a:hover {
+  text-decoration: underline;
+}
+
 .home-logo {
   display: flex;
   flex-direction: column;

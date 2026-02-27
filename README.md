@@ -18,7 +18,7 @@ A React flashcard app that:
 
 Required scope:
 
-- `https://www.googleapis.com/auth/spreadsheets`
+- `https://www.googleapis.com/auth/drive.file`
 
 ## 2) Sheet format
 
@@ -45,6 +45,7 @@ cp .env.example .env.local
 ```
 
 Set `VITE_GOOGLE_CLIENT_ID` in `.env.local`.
+Set `VITE_GOOGLE_API_KEY` in `.env.local` (used by Google Picker).
 
 Then run:
 
@@ -64,13 +65,14 @@ npm run dev:poll
 User flow in the app:
 
 1. `Home`: click `Connect Google`.
-2. `Sheet`: paste/select a sheet URL (or create a new sheet), then `Load Cards`.
+2. `Sheet`: click `Pick Sheet From Drive` (recommended) or paste a sheet URL, then `Load Cards`.
 3. Click `Start Study Round`.
 4. `Study`: answer cards.
 5. `Round Summary`: review stats, sync if needed, then start next round.
 
 Recent/last sheet URLs are remembered in local browser storage.
 The OAuth client ID is app-owned config and is not entered by end users.
+The app includes `/privacy.html` and `/terms.html` pages for policy links.
 
 ## 4) Study behavior
 
@@ -89,13 +91,13 @@ The OAuth client ID is app-owned config and is not entered by end users.
 - `tags` is optional and comma-separated (example: `math,algebra`). It improves distractor relevance.
 - Narration buttons use the free browser Web Speech API:
   - `Read Question`
-  - `Read Answers 1..N` (reads choices as numbered options to avoid giving away the correct one)
+  - `Read Answers`
   - `Stop Voice`
-- Stats update when the card is completed correctly:
+- Stats update on card completion:
   - `seen_count += 1`
-  - correct: `correct_count += 1`, `streak += 1`
+  - first-try correct: `correct_count += 1`, `streak += 1`
+  - any miss before completion: `wrong_count += 1`, `streak = 0`
   - `last_seen_at`, `last_result`, `mastery` recalculated
-  - wrong attempts in correction phase are shown in UI, but are not committed as wrong counts
 
 ## 5) Sync behavior
 

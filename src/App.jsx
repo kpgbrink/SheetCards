@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import sheetCardsLogo from "./assets/sheet-cards-logo.svg";
 
-const SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets";
+const SHEETS_SCOPE = "https://www.googleapis.com/auth/drive.file";
 const STAT_FIELDS = [
   "seen_count",
   "correct_count",
@@ -61,6 +61,7 @@ const STORAGE_KEYS = {
 };
 const RECENT_SHEETS_LIMIT = 6;
 const DEFAULT_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || "";
+const DEFAULT_GOOGLE_API_KEY = import.meta.env.VITE_GOOGLE_API_KEY || "";
 
 function getStoredValue(key, fallback = "") {
   try {
@@ -360,6 +361,51 @@ async function ensureGoogleIdentityScript() {
   });
 }
 
+async function ensureGooglePickerScript() {
+  if (window.gapi?.load && window.google?.picker) {
+    return;
+  }
+
+  await new Promise((resolve, reject) => {
+    const existing = document.querySelector('script[data-gapi="true"]');
+    const onScriptReady = () => {
+      if (!window.gapi?.load) {
+        reject(new Error("Failed to initialize Google API script."));
+        return;
+      }
+      window.gapi.load("picker", {
+        callback: resolve,
+        onerror: () => reject(new Error("Failed to load Google Picker API.")),
+        timeout: 12000,
+        ontimeout: () => reject(new Error("Google Picker API load timed out."))
+      });
+    };
+
+    if (existing) {
+      if (window.gapi?.load) {
+        onScriptReady();
+        return;
+      }
+      existing.addEventListener("load", onScriptReady, { once: true });
+      existing.addEventListener(
+        "error",
+        () => reject(new Error("Failed to load Google API script.")),
+        { once: true }
+      );
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = "https://apis.google.com/js/api.js";
+    script.async = true;
+    script.defer = true;
+    script.dataset.gapi = "true";
+    script.onload = onScriptReady;
+    script.onerror = () => reject(new Error("Failed to load Google API script."));
+    document.head.appendChild(script);
+  });
+}
+
 async function sheetsGetValues({ spreadsheetId, range, accessToken }) {
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`;
   const response = await fetch(url, {
@@ -516,6 +562,7 @@ export default function App() {
     "Connect Google to continue."
   );
   const [gisReady, setGisReady] = useState(false);
+  const [pickerReady, setPickerReady] = useState(false);
   const [accessToken, setAccessToken] = useState("");
   const [cards, setCards] = useState([]);
   const [currentCardId, setCurrentCardId] = useState("");
@@ -611,7 +658,9 @@ export default function App() {
     ].join("\n");
   }, [promptStudyNotes]);
   const clientId = DEFAULT_CLIENT_ID.trim();
+  const googleApiKey = DEFAULT_GOOGLE_API_KEY.trim();
   const isConfigured = Boolean(clientId);
+  const isPickerConfigured = Boolean(googleApiKey);
   const promptFor = useCallback(
     (card, direction) => (direction === "front_to_back" ? card.front : card.back),
     []
@@ -855,6 +904,12 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    ensureGooglePickerScript()
+      .then(() => setPickerReady(true))
+      .catch((error) => setStatus(error.message));
+  }, []);
+
+  useEffect(() => {
     try {
       window.localStorage.setItem(STORAGE_KEYS.sheetRef, sheetRef);
     } catch {
@@ -985,7 +1040,7 @@ export default function App() {
           }
           setAccessToken(tokenResponse.access_token);
           setAppStage("sheet");
-          setStatus("Connected to Google. Next: load or create a sheet.");
+          setStatus("Connected to Google. Next: pick or load a sheet.");
         }
       });
 
@@ -994,6 +1049,62 @@ export default function App() {
       setStatus(`Google sign-in failed to initialize: ${error.message}`);
     }
   }, [clientId, gisReady]);
+
+  const handleDisconnectGoogle = useCallback(() => {
+    const completeDisconnect = () => {
+      clearPendingAdvance();
+      stopNarration();
+      pendingStatsRef.current.clear();
+      contextRef.current = {
+        spreadsheetId: "",
+        statsSheet: {
+          title: CARD_STATS_SHEET,
+          colByName: {}
+        }
+      };
+      setPendingWrites(0);
+      setAccessToken("");
+      setCards([]);
+      setCurrentCardId("");
+      setChoices([]);
+      setAnswerState(null);
+      resetRoundState();
+      setAppStage("connect");
+      setStatus("Disconnected Google access.");
+    };
+
+    if (!accessToken) {
+      completeDisconnect();
+      return;
+    }
+
+    try {
+      if (window.google?.accounts?.oauth2?.revoke) {
+        window.google.accounts.oauth2.revoke(accessToken, () => {
+          completeDisconnect();
+        });
+        return;
+      }
+      completeDisconnect();
+    } catch {
+      completeDisconnect();
+    }
+  }, [accessToken, clearPendingAdvance, resetRoundState, stopNarration]);
+
+  const handleClearLocalData = useCallback(() => {
+    try {
+      window.localStorage.removeItem(STORAGE_KEYS.sheetRef);
+      window.localStorage.removeItem(STORAGE_KEYS.recentSheetRefs);
+      window.localStorage.removeItem(STORAGE_KEYS.recentSheetNames);
+    } catch {
+      // no-op
+    }
+    setSheetRef("");
+    setRecentSheetRefs([]);
+    setRecentSheetNames({});
+    setPromptStudyNotes("");
+    setStatus("Cleared local sheet history and local app data.");
+  }, []);
 
   const handleInitializeSheetTemplate = useCallback(async () => {
     if (!accessToken) {
@@ -1323,6 +1434,15 @@ export default function App() {
       setStatus(`Loaded ${nextCards.length} cards. Click Start Study Round.`);
     } catch (error) {
       const message = String(error.message ?? "");
+      if (
+        message.includes("PERMISSION_DENIED") ||
+        message.includes("The caller does not have permission")
+      ) {
+        setStatus(
+          "This file is not yet authorized for this app. Use 'Pick Sheet From Drive' to grant access, then load again."
+        );
+        return;
+      }
       if (message.includes("Unable to parse range")) {
         setStatus(
           `Sheet tabs are missing. Click "Initialize Sheet Template" to create ${CARD_DATA_SHEET} and ${CARD_STATS_SHEET}.`
@@ -1340,6 +1460,74 @@ export default function App() {
     refreshPendingCount,
     sheetRef,
     spreadsheetId
+  ]);
+
+  const handlePickSheetFromDrive = useCallback(() => {
+    if (!accessToken) {
+      setStatus("Connect Google first.");
+      return;
+    }
+    if (!pickerReady) {
+      setStatus("Google Picker is still loading. Try again in a moment.");
+      return;
+    }
+    if (!isPickerConfigured) {
+      setStatus("App owner action required: missing VITE_GOOGLE_API_KEY.");
+      return;
+    }
+    if (!window.google?.picker) {
+      setStatus("Google Picker is unavailable in this browser session.");
+      return;
+    }
+
+    try {
+      const view = new window.google.picker.DocsView(
+        window.google.picker.ViewId.SPREADSHEETS
+      );
+      view.setIncludeFolders(false);
+      view.setSelectFolderEnabled(false);
+
+      const picker = new window.google.picker.PickerBuilder()
+        .setOAuthToken(accessToken)
+        .setDeveloperKey(googleApiKey)
+        .setTitle("Select a spreadsheet")
+        .addView(view)
+        .setCallback((data) => {
+          if (
+            data[window.google.picker.Response.ACTION] !==
+            window.google.picker.Action.PICKED
+          ) {
+            return;
+          }
+          const doc = (data[window.google.picker.Response.DOCUMENTS] || [])[0] || {};
+          const selectedId = String(doc[window.google.picker.Document.ID] || "").trim();
+          const selectedName = String(doc[window.google.picker.Document.NAME] || "").trim();
+          if (!selectedId) {
+            setStatus("Picker selection did not return a spreadsheet ID.");
+            return;
+          }
+          const nextUrl = `https://docs.google.com/spreadsheets/d/${selectedId}/edit`;
+          setSheetRef(nextUrl);
+          rememberSheetRef(nextUrl, selectedName);
+          setStatus(`Selected ${selectedName || "sheet"}. Auto-loading cards...`);
+          handleLoadCards({
+            spreadsheetId: selectedId,
+            sheetRef: nextUrl
+          });
+        })
+        .build();
+
+      picker.setVisible(true);
+    } catch (error) {
+      setStatus(`Google Picker failed to open: ${error.message}`);
+    }
+  }, [
+    accessToken,
+    googleApiKey,
+    handleLoadCards,
+    isPickerConfigured,
+    pickerReady,
+    rememberSheetRef
   ]);
 
   const handleSelectRecentSheet = useCallback(
@@ -1617,15 +1805,39 @@ export default function App() {
           <h2>Connect Google</h2>
           <p className="status-inline">
             {isConfigured
-              ? "Sign in once to allow read/write access to your sheets."
+              ? isPickerConfigured
+                ? "Sign in once to allow access to spreadsheets you create or pick in this app."
+                : "Google sign-in is configured. App owner: add VITE_GOOGLE_API_KEY to enable Drive Picker."
               : "Missing VITE_GOOGLE_CLIENT_ID in app config."}
           </p>
+          <div className="trust-panel">
+            <h3>What We Access</h3>
+            <ul className="trust-list">
+              <li>Google account sign-in for this app.</li>
+              <li>Files you create with this app or explicitly pick from Google Drive.</li>
+              <li>Card content and learning stats only inside your selected spreadsheet.</li>
+            </ul>
+            <div className="legal-links">
+              <a href="/privacy.html" target="_blank" rel="noreferrer">
+                Privacy Policy
+              </a>
+              <a href="/terms.html" target="_blank" rel="noreferrer">
+                Terms
+              </a>
+            </div>
+          </div>
           <div className="actions">
             <button className="btn btn-accent" onClick={handleSignIn} disabled={!isConfigured}>
               {accessToken ? "Reconnect Google" : "Connect Google"}
             </button>
             <button className="btn btn-subtle" onClick={() => setAppStage("sheet")} disabled={!accessToken}>
               Continue to Sheet
+            </button>
+            <button className="btn btn-subtle" onClick={handleDisconnectGoogle} disabled={!accessToken}>
+              Disconnect Google
+            </button>
+            <button className="btn btn-subtle" onClick={handleClearLocalData}>
+              Clear Local Data
             </button>
           </div>
         </section>
@@ -1649,6 +1861,9 @@ export default function App() {
               <p>{`${CARD_DATA_SHEET} + ${CARD_STATS_SHEET}`}</p>
             </div>
           </div>
+          <p className="status-inline">
+            Recommended: use <strong>Pick Sheet From Drive</strong> so this app is explicitly authorized for the file.
+          </p>
           {recentSheetRefs.length > 0 && (
             <div className="recent-row">
               <span>Recent Sheets</span>
@@ -1667,6 +1882,13 @@ export default function App() {
             </div>
           )}
           <div className="actions">
+            <button
+              className="btn btn-accent"
+              onClick={handlePickSheetFromDrive}
+              disabled={!accessToken || !pickerReady || !isPickerConfigured}
+            >
+              Pick Sheet From Drive
+            </button>
             <button
               className="btn"
               onClick={handleInitializeSheetTemplate}
