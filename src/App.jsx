@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import sheetCardsLogo from "./assets/sheet-cards-logo.svg";
 
 const SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets";
 const STAT_FIELDS = [
@@ -198,6 +199,22 @@ function parseSpreadsheetId(input) {
     return value;
   }
   return "";
+}
+
+function normalizeRecentSheetRefs(list) {
+  if (!Array.isArray(list)) return [];
+  const seen = new Set();
+  const normalized = [];
+  for (const value of list) {
+    const id = parseSpreadsheetId(String(value || ""));
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    normalized.push(id);
+    if (normalized.length >= RECENT_SHEETS_LIMIT) {
+      break;
+    }
+  }
+  return normalized;
 }
 
 function colIndexToLetter(index) {
@@ -482,7 +499,7 @@ export default function App() {
     getStoredValue(STORAGE_KEYS.sheetRef, "")
   );
   const [recentSheetRefs, setRecentSheetRefs] = useState(() =>
-    getStoredList(STORAGE_KEYS.recentSheetRefs)
+    normalizeRecentSheetRefs(getStoredList(STORAGE_KEYS.recentSheetRefs))
   );
   const [recentSheetNames, setRecentSheetNames] = useState(() =>
     getStoredMap(STORAGE_KEYS.recentSheetNames)
@@ -730,16 +747,7 @@ export default function App() {
   const rememberSheetRef = useCallback((value, sheetName = "") => {
     const nextId = parseSpreadsheetId(value);
     if (!nextId) return;
-    setRecentSheetRefs((previous) => {
-      const normalized = previous
-        .map((item) => parseSpreadsheetId(item))
-        .filter(Boolean);
-      const updated = [nextId, ...normalized.filter((item) => item !== nextId)].slice(
-        0,
-        RECENT_SHEETS_LIMIT
-      );
-      return updated;
-    });
+    setRecentSheetRefs((previous) => normalizeRecentSheetRefs([nextId, ...previous]));
     if (sheetName.trim()) {
       setRecentSheetNames((previous) => ({
         ...previous,
@@ -1561,7 +1569,10 @@ export default function App() {
   return (
     <div className="page">
       <header className="hero">
-        <h1>Sheet Cards</h1>
+        <div className="brand">
+          <img className="brand-logo" src={sheetCardsLogo} alt="Sheet Cards logo" />
+          <h1 className="brand-wordmark">Sheet Cards</h1>
+        </div>
         <p>Study flow: Connect Google, then Load Sheet, then Study, then Round Summary.</p>
         <div className="hero-actions">
           <button
@@ -1599,6 +1610,10 @@ export default function App() {
 
       {appStage === "connect" && (
         <section className="panel stage-panel">
+          <div className="home-logo">
+            <img src={sheetCardsLogo} alt="Sheet Cards logo" />
+            <strong>Sheet Cards</strong>
+          </div>
           <h2>Connect Google</h2>
           <p className="status-inline">
             {isConfigured

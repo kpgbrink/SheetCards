@@ -43,6 +43,23 @@ body {
   letter-spacing: 0.03em;
 }
 
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+}
+
+.brand-logo {
+  width: 46px;
+  height: 46px;
+  border-radius: 12px;
+  box-shadow: 0 8px 16px rgba(29, 82, 51, 0.18);
+}
+
+.brand-wordmark {
+  margin: 0;
+}
+
 .hero p {
   margin: 0.5rem 0 0;
   color: var(--muted);
@@ -212,6 +229,27 @@ body {
 
 .stage-panel h2 {
   margin: 0;
+}
+
+.home-logo {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.5rem;
+}
+
+.home-logo img {
+  width: 86px;
+  height: 86px;
+  border-radius: 20px;
+  box-shadow: 0 16px 24px rgba(29, 82, 51, 0.16);
+}
+
+.home-logo strong {
+  font-size: 1rem;
+  letter-spacing: 0.01em;
+  color: var(--accent-strong);
 }
 
 .recent-row {
