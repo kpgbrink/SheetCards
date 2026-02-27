@@ -566,17 +566,20 @@ export default function App() {
     return `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`;
   }, [sheetRef, spreadsheetId]);
   const csvPromptText = useMemo(() => {
-    const headerRow = CARD_TEMPLATE_HEADERS.join(",");
+    const headerRow = CARD_TEMPLATE_HEADERS.join("\t");
     const userMaterial = promptStudyNotes.trim() || "[Paste study material here]";
     return [
-      "With the study material below, create CSV content for my flashcard app.",
-      `Use exactly this header row: ${headerRow}`,
+      "With the study material below, create tab-separated values (TSV) for my flashcard app.",
+      `Use exactly this header row with TAB separators: ${headerRow}`,
       "Rules:",
-      "- Return plain CSV only (no markdown, no extra explanation).",
+      "- Return exactly one fenced code block only (no extra explanation text before or after).",
       "- Include the header row as the first line.",
+      "- Use real TAB characters between columns and a new line for each row.",
       "- Keep this exact column order: question,answer,pronunciation,tags,question_explanation,answer_explanation.",
       "- pronunciation, tags, question_explanation, and answer_explanation are optional and may be blank.",
-      "- Escape commas and quotes correctly for CSV.",
+      "- Do not use tab characters inside cell values; replace inner tabs with a single space.",
+      "- Keep each card on one line (no multi-line cells).",
+      "- Do not output markdown tables.",
       "",
       "Study material:",
       userMaterial
@@ -1697,9 +1700,9 @@ export default function App() {
             </div>
           </div>
           <div className="prompt-builder">
-            <h3>Prompt Starter (CSV Generator)</h3>
+            <h3>Prompt Starter (TSV For Sheets)</h3>
             <p className="status-inline">
-              Paste your topic/study material below, then copy the generated prompt into ChatGPT.
+              Paste your topic/study material below, then copy this prompt into ChatGPT. The output will be tab-separated for direct paste into Google Sheets.
             </p>
             <label className="field">
               <span>Study Material Notes</span>
@@ -1711,8 +1714,8 @@ export default function App() {
               />
             </label>
             <label className="field">
-              <span>Copyable Prompt</span>
-              <textarea value={csvPromptText} readOnly rows={12} />
+              <span>Copyable Prompt (TSV)</span>
+              <textarea value={csvPromptText} readOnly rows={14} />
             </label>
             <div className="actions">
               <button className="btn btn-subtle" onClick={handleCopyCsvPrompt}>
