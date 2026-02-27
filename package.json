@@ -7,6 +7,7 @@
     "dev": "vite",
     "dev:poll": "cross-env CHOKIDAR_USEPOLLING=1 CHOKIDAR_INTERVAL=100 vite",
     "build": "vite build",
+    "build:prod": "vite build",
     "preview": "vite preview"
   },
   "dependencies": {
