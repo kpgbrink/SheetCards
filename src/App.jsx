@@ -1974,6 +1974,11 @@ export default function App() {
   const hasLoadedCards = cards.length > 0;
   const hasSelectedSheet = Boolean(spreadsheetId);
   const canLoadCards = Boolean(accessToken && spreadsheetId);
+  const isFrontToBack = currentDirection === "front_to_back";
+  const randomDirectionText = isFrontToBack ? "F -> B" : "B -> F";
+  const randomDirectionTitle = isFrontToBack ? "Random: Front -> Back" : "Random: Back -> Front";
+  const randomDirectionTone = isFrontToBack ? "direction-pill-front" : "direction-pill-back";
+  const showRandomDirection = studyMode === "random";
   const activeWorkflowStep = !accessToken
     ? 1
     : !hasSelectedSheet
@@ -2447,6 +2452,21 @@ export default function App() {
                 <button className="btn btn-subtle" onClick={() => setAppStage("summary")}>
                   End Round
                 </button>
+              </div>
+              <div className="card-direction-row">
+                <span
+                  className={[
+                    "direction-pill",
+                    randomDirectionTone,
+                    showRandomDirection ? "" : "ui-hidden"
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                  aria-hidden={!showRandomDirection}
+                  title={randomDirectionTitle}
+                >
+                  {randomDirectionText}
+                </span>
               </div>
               <h2
                 className={[
