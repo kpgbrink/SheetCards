@@ -219,6 +219,11 @@ body {
   background: var(--subtle);
 }
 
+.ui-hidden {
+  visibility: hidden;
+  pointer-events: none;
+}
+
 .status {
   margin: 0.8rem 0 0;
   color: var(--muted);
@@ -805,6 +810,23 @@ body {
 .feedback {
   margin: 0.7rem 0 0;
   font-weight: 700;
+}
+
+.study-response-zone {
+  margin-top: 0.55rem;
+  display: grid;
+  gap: 0.4rem;
+  min-height: 7.5rem;
+}
+
+.study-response-zone .feedback {
+  margin: 0;
+  min-height: 1.2rem;
+}
+
+.study-response-zone .card-explain {
+  margin: 0;
+  min-height: 2.4rem;
 }
 
 .feedback.good {

@@ -1931,6 +1931,21 @@ export default function App() {
     answerState?.requiresCorrection || answerState?.completedWithMistake
       ? "bad"
       : "good";
+  const feedbackMessage = answerState
+    ? answerState.requiresCorrection
+      ? "Not yet. Tap the correct answer to continue."
+      : answerState.completedWithMistake
+        ? "Completed after correction. Counted as wrong."
+        : "Correct on first try."
+    : "";
+  const questionExplanationText =
+    answerState && currentCard
+      ? String(promptExplanationFor(currentCard, currentDirection) || "").trim()
+      : "";
+  const answerExplanationText =
+    answerState && currentCard
+      ? String(answerExplanationFor(currentCard, currentDirection) || "").trim()
+      : "";
   const speakQuestion = useCallback(() => {
     if (!currentCard) return;
     const prompt = promptFor(currentCard, currentDirection);
@@ -2005,38 +2020,66 @@ export default function App() {
           >
             Home
           </button>
-          {canGoSheet && (
-            <button
-              className={`btn ${appStage === "sheet" ? "btn-accent" : "btn-subtle"}`}
-              onClick={() => setAppStage("sheet")}
-            >
-              Sheet
-            </button>
-          )}
-          {canGoStudy && (
-            <button
-              className={`btn ${appStage === "study" ? "btn-accent" : "btn-subtle"}`}
-              onClick={() => setAppStage("study")}
-            >
-              Study
-            </button>
-          )}
-          {canGoStudy && (
-            <button
-              className={`btn ${appStage === "summary" ? "btn-accent" : "btn-subtle"}`}
-              onClick={() => setAppStage("summary")}
-            >
-              Round Stats
-            </button>
-          )}
-          {canGoStats && (
-            <button
-              className={`btn ${appStage === "stats" ? "btn-accent" : "btn-subtle"}`}
-              onClick={() => setAppStage("stats")}
-            >
-              Stats
-            </button>
-          )}
+          <button
+            className={[
+              "btn",
+              appStage === "sheet" ? "btn-accent" : "btn-subtle",
+              canGoSheet ? "" : "ui-hidden"
+            ]
+              .filter(Boolean)
+              .join(" ")}
+            onClick={() => setAppStage("sheet")}
+            disabled={!canGoSheet}
+            aria-hidden={!canGoSheet}
+            tabIndex={canGoSheet ? undefined : -1}
+          >
+            Sheet
+          </button>
+          <button
+            className={[
+              "btn",
+              appStage === "study" ? "btn-accent" : "btn-subtle",
+              canGoStudy ? "" : "ui-hidden"
+            ]
+              .filter(Boolean)
+              .join(" ")}
+            onClick={() => setAppStage("study")}
+            disabled={!canGoStudy}
+            aria-hidden={!canGoStudy}
+            tabIndex={canGoStudy ? undefined : -1}
+          >
+            Study
+          </button>
+          <button
+            className={[
+              "btn",
+              appStage === "summary" ? "btn-accent" : "btn-subtle",
+              canGoStudy ? "" : "ui-hidden"
+            ]
+              .filter(Boolean)
+              .join(" ")}
+            onClick={() => setAppStage("summary")}
+            disabled={!canGoStudy}
+            aria-hidden={!canGoStudy}
+            tabIndex={canGoStudy ? undefined : -1}
+          >
+            Round Stats
+          </button>
+          <button
+            className={[
+              "btn",
+              appStage === "stats" ? "btn-accent" : "btn-subtle",
+              canGoStats ? "" : "ui-hidden"
+            ]
+              .filter(Boolean)
+              .join(" ")}
+            onClick={() => setAppStage("stats")}
+            disabled={!canGoStats}
+            aria-hidden={!canGoStats}
+            tabIndex={canGoStats ? undefined : -1}
+          >
+            Stats
+          </button>
         </div>
       </header>
 
@@ -2236,32 +2279,36 @@ export default function App() {
               </button>
             </div>
           </section>
-          {hasLoadedCards ? (
-            <section className="study-cta">
-              <div className="study-cta-copy">
-                <h3>Step 4: Ready To Study</h3>
-                <p>
-                  Your deck is loaded. Start now and keep momentum while these cards are fresh.
-                </p>
-                <div className="study-cta-meta">
-                  <span className="study-pill">{`${cards.length} cards loaded`}</span>
-                  <span className="study-pill">{`${pendingWrites} pending writes`}</span>
-                </div>
+          <section className={`study-cta ${hasLoadedCards ? "" : "study-cta-pending"}`}>
+            <div className="study-cta-copy">
+              <h3>{hasLoadedCards ? "Step 4: Ready To Study" : "Step 4: Start Study"}</h3>
+              <p>
+                {hasLoadedCards ? (
+                  "Your deck is loaded. Start now and keep momentum while these cards are fresh."
+                ) : (
+                  <>
+                    Complete <strong>Step 3: Load Cards</strong>. Start Study Round appears when cards are ready.
+                  </>
+                )}
+              </p>
+              <div
+                className={["study-cta-meta", hasLoadedCards ? "" : "ui-hidden"].filter(Boolean).join(" ")}
+                aria-hidden={!hasLoadedCards}
+              >
+                <span className="study-pill">{`${cards.length} cards loaded`}</span>
+                <span className="study-pill">{`${pendingWrites} pending writes`}</span>
               </div>
-              <button className="btn btn-start-round" onClick={handleStartStudyRound}>
-                Start Study Round
-              </button>
-            </section>
-          ) : (
-            <section className="study-cta study-cta-pending">
-              <div className="study-cta-copy">
-                <h3>Step 4: Start Study</h3>
-                <p>
-                  Complete <strong>Step 3: Load Cards</strong>. Start Study Round appears when cards are ready.
-                </p>
-              </div>
-            </section>
-          )}
+            </div>
+            <button
+              className={["btn", "btn-start-round", hasLoadedCards ? "" : "ui-hidden"].filter(Boolean).join(" ")}
+              onClick={handleStartStudyRound}
+              disabled={!hasLoadedCards}
+              aria-hidden={!hasLoadedCards}
+              tabIndex={hasLoadedCards ? undefined : -1}
+            >
+              Start Study Round
+            </button>
+          </section>
           <details className="prompt-builder">
             <summary>Optional: Generate New Cards With A Prompt</summary>
             <p className="status-inline">
@@ -2350,20 +2397,21 @@ export default function App() {
                 >
                   Manual Next
                 </button>
-                {autoAdvanceMode === "delay" && (
-                  <label className="field inline-field">
-                    <span>Show Answer</span>
-                    <select
-                      value={String(autoAdvanceMs)}
-                      onChange={(event) => setAutoAdvanceMs(Number(event.target.value))}
-                    >
-                      <option value="900">0.9s</option>
-                      <option value="1500">1.5s</option>
-                      <option value="2500">2.5s</option>
-                      <option value="4000">4.0s</option>
-                    </select>
-                  </label>
-                )}
+                <label className={["field", "inline-field", autoAdvanceMode === "delay" ? "" : "ui-hidden"].filter(Boolean).join(" ")}>
+                  <span>Show Answer</span>
+                  <select
+                    value={String(autoAdvanceMs)}
+                    onChange={(event) => setAutoAdvanceMs(Number(event.target.value))}
+                    disabled={autoAdvanceMode !== "delay"}
+                    tabIndex={autoAdvanceMode === "delay" ? undefined : -1}
+                    aria-hidden={autoAdvanceMode !== "delay"}
+                  >
+                    <option value="900">0.9s</option>
+                    <option value="1500">1.5s</option>
+                    <option value="2500">2.5s</option>
+                    <option value="4000">4.0s</option>
+                  </select>
+                </label>
               </div>
               <div className="actions card-actions">
                 <button
@@ -2429,34 +2477,39 @@ export default function App() {
                   );
                 })}
               </div>
-              {answerState && (
-                <p className={`feedback ${feedbackTone}`}>
-                  {answerState.requiresCorrection
-                    ? "Not yet. Tap the correct answer to continue."
-                    : answerState.completedWithMistake
-                      ? "Completed after correction. Counted as wrong."
-                      : "Correct on first try."}
+              <div className="study-response-zone" aria-live="polite">
+                <p
+                  className={["feedback", feedbackTone, answerState ? "" : "ui-hidden"].filter(Boolean).join(" ")}
+                  aria-hidden={!answerState}
+                >
+                  {feedbackMessage || "\u00A0"}
                 </p>
-              )}
-              {answerState && promptExplanationFor(currentCard, currentDirection) && (
-                <p className="card-explain">
+                <p
+                  className={["card-explain", questionExplanationText ? "" : "ui-hidden"].filter(Boolean).join(" ")}
+                  aria-hidden={!questionExplanationText}
+                >
                   <strong>Question Explanation:</strong>{" "}
-                  {promptExplanationFor(currentCard, currentDirection)}
+                  {questionExplanationText || "\u00A0"}
                 </p>
-              )}
-              {answerState && answerExplanationFor(currentCard, currentDirection) && (
-                <p className="card-explain">
+                <p
+                  className={["card-explain", answerExplanationText ? "" : "ui-hidden"].filter(Boolean).join(" ")}
+                  aria-hidden={!answerExplanationText}
+                >
                   <strong>Answer Explanation:</strong>{" "}
-                  {answerExplanationFor(currentCard, currentDirection)}
+                  {answerExplanationText || "\u00A0"}
                 </p>
-              )}
-              {awaitingManualNext && (
-                <div className="actions card-actions">
-                  <button className="btn btn-accent" onClick={goToQueuedNextCard}>
-                    Next Card
-                  </button>
-                </div>
-              )}
+              </div>
+              <div className="actions card-actions">
+                <button
+                  className={["btn", "btn-accent", awaitingManualNext ? "" : "ui-hidden"].filter(Boolean).join(" ")}
+                  onClick={goToQueuedNextCard}
+                  disabled={!awaitingManualNext}
+                  aria-hidden={!awaitingManualNext}
+                  tabIndex={awaitingManualNext ? undefined : -1}
+                >
+                  Next Card
+                </button>
+              </div>
             </div>
           )}
         </section>
