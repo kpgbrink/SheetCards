@@ -54,6 +54,9 @@ body {
   height: 46px;
   border-radius: 12px;
   box-shadow: 0 8px 16px rgba(29, 82, 51, 0.18);
+  transform-style: preserve-3d;
+  transform-origin: center;
+  animation: logo-flip 4.8s ease-in-out infinite;
 }
 
 .brand-wordmark {
@@ -288,6 +291,27 @@ body {
   height: 86px;
   border-radius: 20px;
   box-shadow: 0 16px 24px rgba(29, 82, 51, 0.16);
+  transform-style: preserve-3d;
+  transform-origin: center;
+  animation: logo-flip 5.4s ease-in-out infinite;
+}
+
+@keyframes logo-flip {
+  0%,
+  100% {
+    transform: perspective(720px) rotateY(-16deg) rotateZ(-3deg);
+  }
+  50% {
+    transform: perspective(720px) rotateY(20deg) rotateZ(2deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .brand-logo,
+  .home-logo img {
+    animation: none;
+    transform: none;
+  }
 }
 
 .home-logo strong {
