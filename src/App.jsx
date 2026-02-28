@@ -1846,6 +1846,14 @@ export default function App() {
           expected: correctAnswer,
           requiresCorrection: false
         });
+        if (autoReadQuestion) {
+          speakSequence([
+            {
+              target: "answer",
+              text: correctAnswer
+            }
+          ]);
+        }
 
         if (!roundCompletedRef.current.has(updatedCard.cardId)) {
           roundCompletedRef.current.add(updatedCard.cardId);
@@ -1912,6 +1920,7 @@ export default function App() {
       answerFor,
       autoAdvanceMode,
       autoAdvanceMs,
+      autoReadQuestion,
       cards,
       clearPendingAdvance,
       currentDirection,
@@ -1919,6 +1928,7 @@ export default function App() {
       flushPending,
       goToQueuedNextCard,
       queueStatUpdate,
+      speakSequence,
       sessionWrongCards,
       stopNarration,
       sessionAnswers,
